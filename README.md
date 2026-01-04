@@ -164,12 +164,55 @@ def upload_to_gcs(local_file, bucket_name, blob_name):
     blob.upload_from_filename(local_file)
 ```
 
-## Prochaines Étapes (Part 2)
+# Partie 2 : Ingestion & Pipeline de Données (ETL)
 
-- Ingestion des données dans BigQuery
-- Création du Data Warehouse
-- Transformations et analyses
-- Dashboard de visualisation
+## Vue d'ensemble
+Cette étape constitue le pivot central du projet. Elle assure la transition entre le **Data Lake brut (GCS)** et le **Data Warehouse analytique (BigQuery)**. Le pipeline est conçu pour traiter un volume massif de données (~2,5 millions de lignes) de manière automatisée et fiable.
+
+## Architecture Technique
+Pour ce pipeline, nous avons choisi une architecture **Serverless (sans serveur)** basée sur **Google Cloud Functions**. 
+
+- **Déclenchement (Trigger) :** Event-driven (déclenché par l'arrivée d'un nouveau fichier dans le bucket `globalshop-raw`).
+- **Moteur de traitement :** Python 3.9 avec la bibliothèque **Pandas** pour une manipulation efficace des DataFrames.
+- **Cible :** BigQuery avec partitionnement natif.
+
+
+
+## Processus de Nettoyage et Normalisation
+Chaque fichier entrant subit un cycle de transformation rigoureux pour garantir la qualité des analyses futures :
+
+1. **Validation du Schéma :** Vérification systématique de la présence des colonnes obligatoires (`order_id`, `quantity`, `unit_price`, etc.).
+2. **Nettoyage des données :**
+   - Suppression des lignes ayant des valeurs critiques manquantes (`NULL`).
+   - Filtrage des anomalies métier (ex: `quantity <= 0` ou `unit_price <= 0`).
+3. **Normalisation :**
+   - Conversion des dates au format standard BigQuery (`YYYY-MM-DD`).
+   - Harmonisation des statuts en majuscules (`PAID`, `CANCELLED`).
+   - Mise en majuscules des codes pays.
+4. **Dédoublonnage :** Suppression des doublons basés sur l'identifiant unique `order_id` pour éviter de fausser les calculs de chiffre d'affaires.
+5. **Enrichissement (Métadonnées) :** - Ajout de la colonne `channel` (extraite du nom du fichier : website, mobile ou partner).
+   - Ajout d'un timestamp d'ingestion (`ingestion_at`).
+
+## Optimisation BigData Warehouse
+Conformément aux bonnes pratiques Big Data, la table finale dans BigQuery est **partitionnée par `order_date`**.
+
+### Avantages du partitionnement :
+- **Performance :** Les requêtes SQL de la partie 3 ne scannent que les jours concernés au lieu de toute la table.
+- **Coût :** Réduction drastique des frais de traitement sur Google Cloud.
+- **Scalabilité :** Permet de gérer des historiques sur plusieurs années sans ralentissement.
+
+## Script d'intégration (Logique simplifiée)
+Le script utilise le client `google-cloud-bigquery` pour réaliser des **inserts partitionnés**. 
+
+```python
+# Exemple de configuration de l'insertion partitionnée
+job_config = bigquery.LoadJobConfig(
+    write_disposition="WRITE_APPEND",
+    time_partitioning=bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY,
+        field="order_date" # Colonne utilisée pour le partitionnement
+    )
+)
 
 ## Notes
 
